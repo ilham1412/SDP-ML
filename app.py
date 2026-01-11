@@ -2,7 +2,36 @@ import streamlit as st
 import tempfile
 import os
 import joblib
-from metrics_extractor import extract_metrics
+import lizard
+import pandas as pd
+
+FEATURE_COLUMNS = [
+    "LOC_EXECUTABLE",
+    "CYCLOMATIC_COMPLEXITY"
+]
+
+def extract_metrics(path):
+    data = []
+    # Get all source files in the directory
+    files = [os.path.join(path, f) for f in os.listdir(path) 
+             if f.endswith(('.py', '.java', '.c', '.cpp'))]
+    
+    for file_info in lizard.analyze_files(files):
+        for func in file_info.function_list:
+            data.append({
+                "function": func.name,
+                "file": file_info.filename,
+                "LOC_EXECUTABLE": func.nloc,
+                "CYCLOMATIC_COMPLEXITY": func.cyclomatic_complexity,
+                "NUM_PARAMETERS": len(func.parameters)
+            })
+
+    df = pd.DataFrame(data)
+
+    if df.empty:
+        raise ValueError("Tidak ada function terdeteksi")
+
+    return df
 
 st.title("Software Defect Prediction")
 
@@ -23,10 +52,10 @@ if uploaded_file:
         df_metrics = extract_metrics(tmp)
         st.write("Extracted Metrics", df_metrics)
 
-        model = joblib.load("defect_model_final.pkl")
-        scaler = joblib.load("scaler.pkl")
+        model = joblib.load("final_model.pkl")
+        scaler = joblib.load("scaler_final.pkl")
 
-        FEATURES = ["LOC_EXECUTABLE", "CYCLOMATIC_COMPLEXITY", "NUM_PARAMETERS"]
+        FEATURES = ["LOC_EXECUTABLE", "CYCLOMATIC_COMPLEXITY"]
 
         X = df_metrics[FEATURES]
         X_scaled = scaler.transform(X)
