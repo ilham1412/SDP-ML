@@ -1,4 +1,3 @@
-scaler_final.pkl
-random_forest_jm1_model.pkl
-final_model.pkl
-scaler_jm1.pkl
+model/
+/model/*
+.venv/
