@@ -6,10 +6,11 @@ import lizard
 import pandas as pd
 from radon.metrics import h_visit
 from radon.raw import analyze
+from radon.raw import analyze
+from radon.metrics import h_visit
+import os 
 
-# =====================
 # FEATURE CONFIG
-# =====================
 FEATURE_COLUMNS = [
     "LOC_EXECUTABLE",
     "LOC_TOTAL",
@@ -19,6 +20,35 @@ FEATURE_COLUMNS = [
     "NUM_OPERATORS",
     "NUM_OPERANDS"
 ]
+
+
+def is_python_file(filename):
+    return filename.endswith(".py")
+
+def extract_python_metrics(code, filename):
+    metrics = {
+        "HALSTEAD_VOLUME": None,
+        "HALSTEAD_DIFFICULTY": None,
+        "HALSTEAD_EFFORT": None
+    }
+
+    if not is_python_file(filename):
+        return metrics  
+
+    try:
+        raw = analyze(code)
+        h = h_visit(code)
+
+        if h:
+            metrics["HALSTEAD_VOLUME"] = h[0].volume
+            metrics["HALSTEAD_DIFFICULTY"] = h[0].difficulty
+            metrics["HALSTEAD_EFFORT"] = h[0].effort
+
+    except SyntaxError:
+        pass  
+
+    return metrics
+
 
 def extract_metrics(path):
     data = []
@@ -33,18 +63,31 @@ def extract_metrics(path):
         with open(file_path, "r", errors="ignore") as f:
             code = f.read()
 
-        # RADON
-        raw = analyze(code)
-        halstead = h_visit(code)
+        # DEFAULT VALUE
+        total_loc = None
+        h_volume = None
+        h_difficulty = None
+        num_operators = None
+        num_operands = None
 
-        total_loc = raw.loc
+        # RADON → PYTHON ONLY
+        if is_python_file(file_path):
+            try:
+                raw = analyze(code)
+                halstead = h_visit(code)
 
-        h_volume = halstead.total.volume
-        h_difficulty = halstead.total.difficulty
-        num_operators = halstead.total.N1
-        num_operands = halstead.total.N2
+                total_loc = raw.loc
 
-        # LIZARD
+                if halstead:
+                    h_volume = halstead[0].volume
+                    h_difficulty = halstead[0].difficulty
+                    num_operators = halstead[0].N1
+                    num_operands = halstead[0].N2
+
+            except SyntaxError:
+                pass  
+
+        # LIZARD MULTI LANGUAGE
         for file_info in lizard.analyze_files([file_path]):
             for func in file_info.function_list:
                 data.append({
@@ -92,11 +135,33 @@ if uploaded_file:
         X = df_metrics[FEATURE_COLUMNS]
         X_scaled = scaler.transform(X)
 
-        THRESHOLD = 0.3
+        THRESHOLD = 0.5
         proba = model.predict_proba(X_scaled)[:, 1]
+        y_pred = (proba >= THRESHOLD).astype(int)
 
-        df_metrics["Defect_Probability"] = proba
-        df_metrics["Defect_Prediction"] = (proba >= THRESHOLD).astype(int)
+        def risk_label(prob):
+            if prob < 0.4:
+                return "Low Risk"
+            elif prob <= 0.6:
+                return "Medium Risk"
+            else:
+                return "High Risk"
+        
+        df_result = df_metrics.copy()
 
-        st.subheader("Prediction Result")
-        st.dataframe(df_metrics)
+        df_result["defect_probability"] = proba
+        df_result["prediction"] = y_pred
+        df_result["risk_level"] = df_result["defect_probability"].apply(risk_label)
+
+        threshold = st.slider(
+            "Defect Threshold",
+            min_value=0.1,
+            max_value=0.9,
+            value=0.5,
+            step=0.05
+        )
+
+        df_result["prediction"] = (df_result["defect_probability"] >= threshold).astype(int)
+        df_result["risk_level"] = df_result["defect_probability"].apply(risk_label)
+
+        st.dataframe(df_result)
